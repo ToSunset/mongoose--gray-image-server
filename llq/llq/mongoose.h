@@ -16,7 +16,6 @@
 // license, as set out in https://www.mongoose.ws/licensing/
 //
 // SPDX-License-Identifier: GPL-2.0-only or commercial
-
 #ifndef MONGOOSE_H
 #define MONGOOSE_H
 

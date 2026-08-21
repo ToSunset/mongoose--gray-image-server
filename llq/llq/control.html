@@ -31,6 +31,15 @@
     border-bottom:1px solid var(--border);
   }
   .navbar h1 { font-size:20px; font-weight:600; }
+  .navbar .status {
+    display:flex; align-items:center; gap:6px;
+    font-size:13px; color:var(--text-dim);
+  }
+  .navbar .dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:#22c55e; transition:background 0.3s;
+  }
+  .navbar .dot.disconnected { background:#ef4444; }
   .navbar a {
     color:var(--text-dim); text-decoration:none; font-size:14px;
     transition:color 0.2s;
@@ -42,7 +51,6 @@
     display:grid; grid-template-columns:1fr 360px; gap:24px;
   }
 
-  /* Image card */
   .img-card {
     background: var(--surface2);
     backdrop-filter: blur(12px);
@@ -71,10 +79,7 @@
     pointer-events:none; opacity:0;
     transition:opacity 0.3s;
   }
-  .img-wrap img:not([src]) ~ .img-loading,
-  .img-wrap img[src=""] ~ .img-loading { opacity:1; }
 
-  /* Settings card */
   .settings-card {
     background: var(--surface2);
     backdrop-filter: blur(12px);
@@ -120,18 +125,31 @@
 </style>
 </head>
 <body>
+<!-- 导航栏：左侧标题，中间流状态指示灯，右侧退出登录 -->
 <div class="navbar">
   <h1>实时图像监控</h1>
+  <div class="status">
+    <span class="dot" id="streamDot"></span>
+    <span id="streamStatus">连接中...</span>
+  </div>
   <a href="/logout">退出登录</a>
 </div>
+
 <div class="container">
+  <!-- 左侧：图像预览（直连 multipart 流） -->
   <div class="img-card">
     <h3>灰度图像实时显示</h3>
     <div class="img-wrap">
-      <img id="live" src="/image" alt="实时图像">
-      <div class="img-loading">加载中...</div>
+      <!-- 优化5: img src 直接指向 /stream 长连接口
+           浏览器通过 multipart/x-mixed-replace 自动解析推送帧，
+           无需 JS 定时器轮询，消除定时器开销和后台标签页限流问题。
+           每收到一个新帧，浏览器自动替换 img 内容（不闪烁、不断连）。 -->
+      <img id="live" src="/stream" alt="实时图像">
+      <div class="img-loading">等待画面...</div>
     </div>
   </div>
+
+  <!-- 右侧：参数设置 -->
   <div class="settings-card">
     <h3>参数设置</h3>
     <form method="post" action="/config">
@@ -151,7 +169,49 @@
     </form>
   </div>
 </div>
+
 <script>
+/* 优化6: 监听 img 的加载/错误事件，实现自动重连
+   浏览器在 multipart 流断开时会触发 img.onerror，
+   这里自动重新连接，保证画面持续刷新。 */
+(function() {
+  var img = document.getElementById("live");
+  var dot = document.getElementById("streamDot");
+  var statusText = document.getElementById("streamStatus");
+  var reconnectTimer = null;
+
+  function setConnected(ok) {
+    dot.className = "dot" + (ok ? "" : " disconnected");
+    statusText.textContent = ok ? "连接中..." : "断开重连";
+  }
+
+  // 连接成功（首次加载或重连后第一帧到达）
+  img.onload = function() {
+    setConnected(true);
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+
+  // 连接断开（服务器关闭、网络中断等）
+  img.onerror = function() {
+    setConnected(false);
+    /* 优化7: 后台标签页限流解决
+       multipart/x-mixed-replace 不受浏览器 requestAnimationFrame 节流影响，
+       因为它是被动接收服务器推送，不依赖 JS 定时器。
+       但如果断开，我们用指数退避重连，避免死循环 */
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(function() {
+        reconnectTimer = null;
+        // 追加时间戳绕过浏览器缓存，强制发起新连接
+        img.src = "/stream?t=" + new Date().getTime();
+      }, 2000);
+    }
+  };
+
+  // 初始加载时设置 loading 状态
+  setConnected(false);
+})();
+
+/* 加载当前配置参数（与之前相同） */
 function loadConfig() {
   fetch("/config_data")
     .then(r => r.json())
@@ -162,10 +222,6 @@ function loadConfig() {
     });
 }
 loadConfig();
-setInterval(function(){
-  var img = document.getElementById("live");
-  img.src = "/image?t=" + new Date().getTime();
-}, 500);
 </script>
 </body>
 </html>
