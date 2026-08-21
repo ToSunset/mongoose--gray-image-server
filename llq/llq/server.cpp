@@ -8,11 +8,35 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#ifdef _WIN32
+#include <winsock2.h>
+// MSVC 没有 gettimeofday，提供一个兼容实现
+#ifndef HAVE_GETTIMEOFDAY
+static int gettimeofday(struct timeval *tv, struct timezone *tz) {
+    FILETIME ft;
+    unsigned __int64 tmp = 0;
+    if (tv) {
+        GetSystemTimeAsFileTime(&ft);
+        tmp |= ft.dwHighDateTime;
+        tmp <<= 32;
+        tmp |= ft.dwLowDateTime;
+        tmp /= 10;  // 转换为微秒
+        tmp -= 11644473600000000ULL;  // 1970-01-01 到 1601-01-01
+        tv->tv_sec = (long)(tmp / 1000000ULL);
+        tv->tv_usec = (long)(tmp % 1000000ULL);
+    }
+    return 0;
+}
+#define HAVE_GETTIMEOFDAY 1
+#endif
+#else
+#include <sys/time.h>
+#endif
 
  // ---------- 默认参数 ----------
 static int g_width = 320;
 static int g_height = 240;
-static int g_interval = 0.1;          // 图像生成间隔(秒)
+static double g_interval_ms = 33.0;     // 图像生成间隔(毫秒)，默认约30fps
 
 // ---------- BMP 缓冲区 ----------
 static uint8_t* g_bmp = NULL;
@@ -30,13 +54,14 @@ static struct mg_connection *g_streams[MAX_STREAMS];
 static int g_num_streams;
 
 // ---------- 帧生成定时 ----------
-static time_t g_last_gen;           // 上一次生成帧的时间
+static struct timeval g_last_gen;       // 上一次生成帧的时间
 
 // 前向声明
 void alloc_bmp(int w, int h);
 void free_bmp(void);
 void generate_frame(int w, int h, uint8_t* pixels, int frame);
 static void push_frame_to_streams(void);
+static double get_time_ms(void);
 
 // ===== BMP 8位灰度构造 =====
 static int row_size(int w) {
@@ -74,6 +99,13 @@ void free_bmp(void) {
     free(g_bmp);
     g_bmp = NULL;
     g_bmp_size = 0;
+}
+
+/* 高精度时间获取 (毫秒) */
+static double get_time_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
 }
 
 /* 生成动态条纹 + 渐变 (帧号自增) */
@@ -257,13 +289,17 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             mg_http_get_var(&hm->body, "height", h_str, sizeof(h_str));
             mg_http_get_var(&hm->body, "interval", iv_str, sizeof(iv_str));
 
-            int nw = atoi(w_str), nh = atoi(h_str), niv = atoi(iv_str);
+            int nw = atoi(w_str), nh = atoi(h_str);
+            double niv = atof(iv_str);
+            
             if (nw < 1 || nw>4096) nw = 320;
             if (nh < 1 || nh>4096) nh = 240;
-            if (niv <= 0) niv = 1;//我改过了，但是没啥用
+            if (niv <= 0.0) niv = 33.0;  // 最小 33ms (~30fps)
+            if (niv > 10000.0) niv = 10000.0;  // 最大 10秒
+            
             g_width = nw;
             g_height = nh;
-            g_interval = niv;
+            g_interval_ms = niv;
             alloc_bmp(nw, nh);
 
             mg_http_reply(c, 302, "Location: /\r\n", "");
@@ -274,8 +310,8 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
         if (mg_match(hm->uri, mg_str("/config_data"), NULL)) {
             char buf[128];
             snprintf(buf, sizeof(buf),
-                "{\"width\":%d,\"height\":%d,\"interval\":%d}",
-                g_width, g_height, g_interval);
+                "{\"width\":%d,\"height\":%d,\"interval\":%.1f}",
+                g_width, g_height, g_interval_ms);
             mg_http_reply(c, 200,
                 "Content-Type: application/json\r\n"
                 "Cache-Control: no-cache\r\n", "%s", buf);
@@ -297,52 +333,55 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
 
 // ===== 主函数 =====
 int main(void) {
-    /* 优化1: 降级日志级别，屏蔽海量连接日志
-     * 方案A: 只显示 ERROR 级别 (默认是 MG_LL_INFO，会打印每条连接) */
+    /* 优化1: 降级日志级别，屏蔽海量连接日志 */
     mg_log_set(MG_LL_ERROR);
 
-    /* 方案B (可选): 自定义日志过滤 - 取消下面注释即可启用
-     * 会完全禁用 Mongoose 内置日志，需要时可用 fprintf 手动打日志 */
-    // mg_log_set_callback(NULL, NULL);
+#ifdef _WIN32
+    // Windows 下初始化 Winsock（gettimeofday 需要）
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 2), &wsa_data);
+#endif
 
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
 
-    /* 优化2: 开启长连接 (Keep-Alive)
-     * Mongoose 默认已启用 HTTP/1.1 keep-alive，无需额外配置。
-     * 每个请求的 Connection 头默认保持，减少 TCP 握手开销。 */
+    /* 优化2: 开启长连接 (Keep-Alive) */
     if (mg_http_listen(&mgr, "http://0.0.0.0:8000", ev_handler, NULL) == NULL) {
         fprintf(stderr, "Cannot start server\n");
         return 1;
     }
     printf("Server: http://localhost:8000\n");
-    printf("Log:   Only errors shown (mg_log_set(MG_LL_ERROR)).\n");
-    printf("       Alternative: define mg_log_set_callback(NULL,NULL) in main().\n");
+    printf("Frame rate: %.1fms interval (%.0ffps default)\n", 
+           g_interval_ms, 1000.0/g_interval_ms);
 
     alloc_bmp(g_width, g_height);
-    g_last_gen = time(NULL);
+    gettimeofday(&g_last_gen, NULL);
 
     /* 优化3: 主循环按帧间隔定时生成图像 + 推流
-     * mg_mgr_poll 第二个参数 50ms = 每 50ms 轮询一次事件，
+     * mg_mgr_poll 第二个参数 10ms = 每 10ms 轮询一次事件，
      * 兼顾低延迟响应和 CPU 占用。 */
     while (g_running) {
-        mg_mgr_poll(&mgr, 50);
+        mg_mgr_poll(&mgr, 10);
 
-        time_t now = time(NULL);
-        if (now - g_last_gen >= g_interval) {
+        double now = get_time_ms();
+        double elapsed = now - (g_last_gen.tv_sec * 1000.0 + g_last_gen.tv_usec / 1000.0);
+        
+        if (elapsed >= g_interval_ms) {
             static int s_frame = 0;
             size_t hdr = 14 + 40 + 256 * 4;
             generate_frame(g_width, g_height, g_bmp + hdr, s_frame++);
 
-            /* 优化4: 生成后立即推送给所有流连接
-             * 浏览器收到 multipart 新帧后自动渲染，无需前端定时器 */
+            /* 优化4: 生成后立即推送给所有流连接 */
             push_frame_to_streams();
 
-            g_last_gen = now;
+            gettimeofday(&g_last_gen, NULL);
         }
     }
 
     free_bmp();
+#ifdef _WIN32
+    WSACleanup();
+#endif
     mg_mgr_free(&mgr);
     return 0;
 }
