@@ -85,6 +85,30 @@ void generate_frame(int w, int h, uint8_t* pixels, int frame) {
     }
 }
 
+
+// ---------- helper: serve HTML file ----------
+static void serve_file(struct mg_connection *c, const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        mg_http_reply(c, 500, NULL, "Internal Server Error\n");
+        return;
+    }
+    fseek(fp, 0, SEEK_END);
+    long len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    char *data = (char*)malloc((size_t)len + 1);
+    if (!data) {
+        fclose(fp);
+        mg_http_reply(c, 500, NULL, "Internal Server Error\n");
+        return;
+    }
+    size_t n = fread(data, 1, (size_t)len, fp);
+    fclose(fp);
+    data[n] = '\0';
+    mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n", "%s", data);
+    free(data);
+}
+
 // ===== Mongoose 请求处理 =====
 static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
     if (ev == MG_EV_HTTP_MSG) {
@@ -97,39 +121,10 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             if (cookie) mg_http_get_var(cookie, "session", session, sizeof(session));
             int logged = (session[0] && strcmp(session, g_session_token) == 0);
 
-            if (!logged) {
-                mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n",
-                    "<!DOCTYPE html>"
-                    "<html><head><meta charset=gbk><title>登录</title></head>"
-                    "<body><h2>图像服务器 - 登录</h2>"
-                    "<form method='post' action='/login'>"
-                    "用户名: <input name='user'><br>"
-                    "密码: <input type='password' name='password'><br>"
-                    "<input type='submit' value='登录'>"
-                    "</form></body></html>");
-            }
-            else {
-                mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n",
-                    "<!DOCTYPE html>"
-                    "<html><head><meta charset=gbk><title>控制面板</title>"
-                    "<script>"
-                    "setInterval(function(){"
-                    " document.getElementById('live').src='/image?t='+new Date().getTime();"
-                    "}, 500);"
-                    "</script></head>"
-                    "<body>"
-                    "<h2>8位灰度图像实时显示</h2>"
-                    "<img id='live' src='/image' style='border:1px solid black'><br>"
-                    "<h3>参数设置</h3>"
-                    "<form method='post' action='/config'>"
-                    "宽度: <input type='number' name='width' value='%d'><br>"
-                    "高度: <input type='number' name='height' value='%d'><br>"
-                    "生成间隔(秒): <input type='number' name='interval' value='%d' step='1' min='1'><br>"
-                    "<input type='submit' value='设置'>"
-                    "</form><br><a href='/logout'>退出登录</a>"
-                    "</body></html>",
-                    g_width, g_height, g_interval);
-            }
+            if (!logged)
+                serve_file(c, "login.html");
+            else
+                serve_file(c, "control.html");
             return;
         }
 
@@ -148,8 +143,7 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
                 mg_http_reply(c, 302, cookie_hdr, "");
             }
             else {
-                mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n",
-                    "<html><body>登录失败 <a href='/'>重试</a></body></html>");
+                serve_file(c, "fail.html");;
             }
             return;
         }
@@ -207,6 +201,16 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             alloc_bmp(nw, nh);          // 立即重建缓冲区
 
             mg_http_reply(c, 302, "Location: /\r\n", "");
+            return;
+        }
+
+        // --- 获取当前参数 (JSON) ---
+        if (mg_match(hm->uri, mg_str("/config_data"), NULL)) {
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                "{\"width\":%d,\"height\":%d,\"interval\":%d}",
+                g_width, g_height, g_interval);
+            mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s", buf);
             return;
         }
 

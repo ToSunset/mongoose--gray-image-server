@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head><meta charset=gbk><title>控制面板</title>
+<script>
+function loadConfig() {
+    fetch("/config_data")
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById("w").value = d.width;
+            document.getElementById("h").value = d.height;
+            document.getElementById("iv").value = d.interval;
+        });
+}
+setInterval(function(){
+    document.getElementById("live").src="/image?t="+new Date().getTime();
+}, 500);
+</script></head>
+<body onload="loadConfig()">
+<h2>8位灰度图像实时显示</h2>
+<img id="live" src="/image" style="border:1px solid black"><br>
+<h3>参数设置</h3>
+<form method="post" action="/config">
+宽度: <input type="number" name="width" id="w"><br>
+高度: <input type="number" name="height" id="h"><br>
+生成间隔(秒): <input type="number" name="interval" id="iv" step="1" min="1"><br>
+<input type="submit" value="设置">
+</form><br><a href="/logout">退出登录</a>
+</body></html>
