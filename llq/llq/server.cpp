@@ -105,7 +105,7 @@ static void serve_file(struct mg_connection *c, const char *path) {
     size_t n = fread(data, 1, (size_t)len, fp);
     fclose(fp);
     data[n] = '\0';
-    mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n", "%s", data);
+    mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\nCache-Control: no-cache, no-store, must-revalidate\r\n", "%s", data);
     free(data);
 }
 

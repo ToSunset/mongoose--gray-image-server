@@ -1,1 +1,46 @@
-<html><body>登录失败 <a href="/">重试</a></body></html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset=gbk>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录失败</title>
+<style>
+  :root {
+    --bg-start: #0f172a; --bg-end: #1e293b;
+    --text: #e2e8f0; --text-dim: #94a3b8;
+    --primary: #3b82f6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(135deg,var(--bg-start),var(--bg-end));
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;
+    padding:16px;
+  }
+  .card {
+    max-width:360px; width:100%; padding:32px; text-align:center;
+    background:rgba(30,41,59,0.7); backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:16px;
+    box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);
+  }
+  .card .icon { font-size:48px; margin-bottom:8px; }
+  .card h2 { color:var(--text); font-size:20px; margin-bottom:8px; }
+  .card p { color:var(--text-dim); font-size:14px; margin-bottom:24px; }
+  .card a {
+    display:inline-block; padding:10px 28px; border-radius:10px;
+    background:var(--primary); color:#fff; text-decoration:none;
+    font-size:15px; font-weight:600; transition:background 0.2s;
+  }
+  .card a:hover { background:#60a5fa; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#x26A0;</div>
+  <h2>登录失败</h2>
+  <p>账号或密码错误，请重试</p>
+  <a href="/">返回登录</a>
+</div>
+</body>
+</html>

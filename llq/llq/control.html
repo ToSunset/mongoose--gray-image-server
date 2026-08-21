@@ -1,27 +1,171 @@
 <!DOCTYPE html>
-<html><head><meta charset=gbk><title>控制面板</title>
+<html lang="zh-CN">
+<head>
+<meta charset=gbk>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>控制面板</title>
+<style>
+  :root {
+    --bg:        #0f172a;
+    --surface:   #1e293b;
+    --surface2:  rgba(30,41,59,0.7);
+    --border:    rgba(255,255,255,0.08);
+    --primary:   #3b82f6;
+    --primary-hover: #60a5fa;
+    --text:      #e2e8f0;
+    --text-dim:  #94a3b8;
+    --radius:    14px;
+    --shadow:    0 8px 32px rgba(0,0,0,0.3);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    min-height:100vh;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    color: var(--text);
+  }
+  .navbar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 24px;
+    background: var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .navbar h1 { font-size:20px; font-weight:600; }
+  .navbar a {
+    color:var(--text-dim); text-decoration:none; font-size:14px;
+    transition:color 0.2s;
+  }
+  .navbar a:hover { color:var(--primary); }
+
+  .container {
+    max-width:1100px; margin:0 auto; padding:24px 16px;
+    display:grid; grid-template-columns:1fr 360px; gap:24px;
+  }
+
+  /* Image card */
+  .img-card {
+    background: var(--surface2);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:20px;
+    box-shadow:var(--shadow);
+  }
+  .img-card h3 { font-size:15px; color:var(--text-dim); margin-bottom:12px; font-weight:500; }
+  .img-wrap {
+    position:relative;
+    border-radius:10px; overflow:hidden;
+    background:#000;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+  }
+  .img-wrap img {
+    display:block; width:100%; height:auto;
+    image-rendering:pixelated;
+  }
+  .img-loading {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim); font-size:14px;
+    background:rgba(0,0,0,0.5);
+    pointer-events:none; opacity:0;
+    transition:opacity 0.3s;
+  }
+  .img-wrap img:not([src]) ~ .img-loading,
+  .img-wrap img[src=""] ~ .img-loading { opacity:1; }
+
+  /* Settings card */
+  .settings-card {
+    background: var(--surface2);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:24px 20px;
+    box-shadow:var(--shadow);
+  }
+  .settings-card h3 {
+    font-size:16px; font-weight:600; margin-bottom:20px;
+    padding-bottom:12px; border-bottom:1px solid var(--border);
+  }
+  .field { position:relative; margin-bottom:20px; }
+  .field input {
+    width:100%; padding:14px 14px 6px; font-size:16px;
+    background:rgba(15,23,42,0.6); color:var(--text);
+    border:1px solid rgba(255,255,255,0.12); border-radius:10px;
+    outline:none; transition:border-color 0.2s;
+  }
+  .field input:focus { border-color:var(--primary); }
+  .field label {
+    position:absolute; left:14px; top:14px;
+    color:var(--text-dim); font-size:16px;
+    pointer-events:none; transition:0.2s ease;
+  }
+  .field input:focus + label,
+  .field input:not(:placeholder-shown) + label {
+    top:4px; font-size:11px; color:var(--primary);
+  }
+  .field input::placeholder { color:transparent; }
+  .btn {
+    width:100%; padding:12px; font-size:16px; font-weight:600;
+    background:var(--primary); color:#fff; border:none; border-radius:10px;
+    cursor:pointer; transition:background 0.2s, transform 0.1s;
+  }
+  .btn:hover { background:var(--primary-hover); }
+  .btn:active { transform:scale(0.97); }
+
+  @media (max-width:768px) {
+    .container { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="navbar">
+  <h1>实时图像监控</h1>
+  <a href="/logout">退出登录</a>
+</div>
+<div class="container">
+  <div class="img-card">
+    <h3>灰度图像实时显示</h3>
+    <div class="img-wrap">
+      <img id="live" src="/image" alt="实时图像">
+      <div class="img-loading">加载中...</div>
+    </div>
+  </div>
+  <div class="settings-card">
+    <h3>参数设置</h3>
+    <form method="post" action="/config">
+      <div class="field">
+        <input type="number" id="w" name="width" placeholder=" " min="1" max="4096">
+        <label for="w">宽度</label>
+      </div>
+      <div class="field">
+        <input type="number" id="h" name="height" placeholder=" " min="1" max="4096">
+        <label for="h">高度</label>
+      </div>
+      <div class="field">
+        <input type="number" id="iv" name="interval" placeholder=" " min="1" step="1">
+        <label for="iv">生成间隔(秒)</label>
+      </div>
+      <button class="btn" type="submit">设置</button>
+    </form>
+  </div>
+</div>
 <script>
 function loadConfig() {
-    fetch("/config_data")
-        .then(r => r.json())
-        .then(d => {
-            document.getElementById("w").value = d.width;
-            document.getElementById("h").value = d.height;
-            document.getElementById("iv").value = d.interval;
-        });
+  fetch("/config_data")
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById("w").value = d.width;
+      document.getElementById("h").value = d.height;
+      document.getElementById("iv").value = d.interval;
+    });
 }
+loadConfig();
 setInterval(function(){
-    document.getElementById("live").src="/image?t="+new Date().getTime();
+  var img = document.getElementById("live");
+  img.src = "/image?t=" + new Date().getTime();
 }, 500);
-</script></head>
-<body onload="loadConfig()">
-<h2>8位灰度图像实时显示</h2>
-<img id="live" src="/image" style="border:1px solid black"><br>
-<h3>参数设置</h3>
-<form method="post" action="/config">
-宽度: <input type="number" name="width" id="w"><br>
-高度: <input type="number" name="height" id="h"><br>
-生成间隔(秒): <input type="number" name="interval" id="iv" step="1" min="1"><br>
-<input type="submit" value="设置">
-</form><br><a href="/logout">退出登录</a>
-</body></html>
+</script>
+</body>
+</html>
