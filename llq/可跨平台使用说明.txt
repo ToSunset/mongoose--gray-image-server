@@ -1,0 +1,13 @@
+可跨平台
+
+# Linux / macOS / Windows (MinGW):
+gcc -o server server.cpp mongoose.c -lm
+
+# Windows MSVC:
+cl server.cpp mongoose.c
+
+登录信息
+用户名: admin
+密码: 123456
+
+*至日落

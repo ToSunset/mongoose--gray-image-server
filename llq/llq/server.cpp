@@ -1,10 +1,8 @@
 /*
- * Windows Mongoose 8位灰度图像服务器
- * 编译:  gcc -o server.exe server.c mongoose.c -lws2_32
- *        (或 MSVC: cl server.c mongoose.c ws2_32.lib)
+ * Pure C Mongoose 8位灰度图像服务器
+ * 编译:  gcc -o server server.cpp mongoose.c -lm
  */
 #include "mongoose.h"
-#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,8 +17,7 @@ static int g_interval = 1;          // 图像生成间隔(秒)
 // ---------- BMP 缓冲区 ----------
 static uint8_t* g_bmp = NULL;
 static size_t g_bmp_size = 0;
-static CRITICAL_SECTION g_cs;       // 线程同步
-static volatile int g_running = 1;
+static int g_running = 1;
 
 // ---------- 简易登录 ----------
 static char g_session_token[64] = { 0 };
@@ -31,7 +28,6 @@ static const char* PASSWORD = "123456";
 void alloc_bmp(int w, int h);
 void free_bmp(void);
 void generate_frame(int w, int h, uint8_t* pixels, int frame);
-DWORD WINAPI image_thread(LPVOID lpParam);
 
 // ===== BMP 8位灰度构造 =====
 static int row_size(int w) {
@@ -62,20 +58,15 @@ void alloc_bmp(int w, int h) {
         palette[i * 4 + 0] = palette[i * 4 + 1] = palette[i * 4 + 2] = (uint8_t)i;
         palette[i * 4 + 3] = 0;
     }
-
-    EnterCriticalSection(&g_cs);
     free(g_bmp);
     g_bmp = buf;
     g_bmp_size = total;
-    LeaveCriticalSection(&g_cs);
 }
 
 void free_bmp(void) {
-    EnterCriticalSection(&g_cs);
     free(g_bmp);
     g_bmp = NULL;
     g_bmp_size = 0;
-    LeaveCriticalSection(&g_cs);
 }
 
 // 生成动态条纹 + 渐变
@@ -92,21 +83,6 @@ void generate_frame(int w, int h, uint8_t* pixels, int frame) {
             pixels[row * rsize + x] = (uint8_t)val;
         }
     }
-}
-
-// 后台图像生成线程
-DWORD WINAPI image_thread(LPVOID lpParam) {
-    int frame = 0;
-    while (g_running) {
-        EnterCriticalSection(&g_cs);
-        if (g_bmp) {
-            size_t headers = 14 + 40 + 256 * 4;
-            generate_frame(g_width, g_height, g_bmp + headers, frame++);
-        }
-        LeaveCriticalSection(&g_cs);
-        Sleep(g_interval * 1000);
-    }
-    return 0;
 }
 
 // ===== Mongoose 请求处理 =====
@@ -165,12 +141,11 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             if (strcmp(user, USERNAME) == 0 && strcmp(pass, PASSWORD) == 0) {
                 srand((unsigned)time(NULL));
                 snprintf(g_session_token, sizeof(g_session_token), "%08x%08x", rand(), rand());
-                char cb[256];
-                snprintf(cb, sizeof(cb),
+                char cookie_hdr[256];
+                snprintf(cookie_hdr, sizeof(cookie_hdr),
                     "Set-Cookie: session=%s; Path=/; HttpOnly\r\n"
                     "Location: /\r\n", g_session_token);
-                mg_http_reply(c, 302, cb, "");
-
+                mg_http_reply(c, 302, cookie_hdr, "");
             }
             else {
                 mg_http_reply(c, 200, "Content-Type: text/html; charset=gbk\r\n",
@@ -190,8 +165,10 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
 
         // --- 获取图像 ---
         if (mg_match(hm->uri, mg_str("/image"), NULL)) {
-            EnterCriticalSection(&g_cs);
             if (g_bmp) {
+                size_t headers = 14 + 40 + 256 * 4;
+                static int frame = 0;
+                generate_frame(g_width, g_height, g_bmp + headers, frame++);
                 mg_printf(c,
                     "HTTP/1.1 200 OK\r\n"
                     "Content-Type: image/bmp\r\n"
@@ -202,7 +179,6 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             else {
                 mg_http_reply(c, 500, NULL, "no image\n");
             }
-            LeaveCriticalSection(&g_cs);
             return;
         }
 
@@ -225,12 +201,9 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
             if (nw < 1 || nw>4096) nw = 320;
             if (nh < 1 || nh>4096) nh = 240;
             if (niv < 1) niv = 1;
-
-            EnterCriticalSection(&g_cs);
             g_width = nw;
             g_height = nh;
             g_interval = niv;
-            LeaveCriticalSection(&g_cs);
             alloc_bmp(nw, nh);          // 立即重建缓冲区
 
             mg_http_reply(c, 302, "Location: /\r\n", "");
@@ -243,8 +216,6 @@ static void ev_handler(struct mg_connection* c, int ev, void* ev_data) {
 
 // ===== 主函数 =====
 int main(void) {
-    InitializeCriticalSection(&g_cs);
-
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
     if (mg_http_listen(&mgr, "http://0.0.0.0:8000", ev_handler, NULL) == NULL) {
@@ -254,14 +225,8 @@ int main(void) {
     printf("Server: http://localhost:8000\n");
 
     alloc_bmp(g_width, g_height);
-    HANDLE hThread = CreateThread(NULL, 0, image_thread, NULL, 0, NULL);
-
     while (g_running) mg_mgr_poll(&mgr, 100);
-
-    WaitForSingleObject(hThread, INFINITE);
-    CloseHandle(hThread);
     free_bmp();
-    DeleteCriticalSection(&g_cs);
     mg_mgr_free(&mgr);
     return 0;
 }

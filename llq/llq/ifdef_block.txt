@@ -1,0 +1,28 @@
+#ifdef _WIN32  
+#include <windows.h>  
+#define mg_lock_t CRITICAL_SECTION  
+#define mg_lock_init(m) InitializeCriticalSection(m)  
+#define mg_lock(m) EnterCriticalSection(m)  
+#define mg_unlock(m) LeaveCriticalSection(m)  
+#define mg_lock_destroy(m) DeleteCriticalSection(m)  
+#define mg_thread_t HANDLE 
+#define mg_thread_create(t,f,a) ((*(t)=CreateThread(NULL,0,f,a,0,NULL))!=NULL)  
+#define mg_thread_join(t) WaitForSingleObject(t,INFINITE);CloseHandle(t)  
+#define mg_sleep(s) Sleep((s)*1000)  
+#define MG_THREAD_RET DWORD WINAPI  
+#define MG_THREAD_RETVAL return 0  
+#else  
+#include <pthread.h>  
+#include <unistd.h> 
+#define mg_lock_t pthread_mutex_t  
+#define mg_lock_init(m) pthread_mutex_init(m,NULL)  
+#define mg_lock(m) pthread_mutex_lock(m)  
+#define mg_unlock(m) pthread_mutex_unlock(m)  
+#define mg_lock_destroy(m) pthread_mutex_destroy(m)  
+#define mg_thread_t pthread_t  
+#define mg_thread_create(t,f,a) (pthread_create(t,NULL,f,a)==0)  
+#define mg_thread_join(t) pthread_join(t,NULL)  
+#define mg_sleep(s) sleep(s)  
+#define MG_THREAD_RET void*  
+#define MG_THREAD_RETVAL return NULL  
+#endif 
